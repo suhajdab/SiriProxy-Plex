@@ -39,7 +39,7 @@ class SiriProxy::Plugin::Plex < SiriProxy::Plugin
     @plex_library = PlexLibrary.new(@host, @port, @tv_index, @player)
   end
 
-  listen_for /what is on deck/i do
+  listen_for /what\047s on deck/i do
     ondeck_shows = @plex_library.all_ondeck()
     if(!ondeck_shows.empty?)
        say "On Deck shows are:"

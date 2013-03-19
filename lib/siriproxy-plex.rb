@@ -30,179 +30,187 @@ require 'plex_library'
 ######
 
 class SiriProxy::Plugin::Plex < SiriProxy::Plugin
-  
-  def initialize(config)
-    @host = config["plex_host"]
-    @port = config["plex_port"]
-    @tv_index = config["plex_tv_index"]
-    @player = config["plex_player_host"].nil? ? config["plex_host"] : config["plex_player_host"]
-    @plex_library = PlexLibrary.new(@host, @port, @tv_index, @player)
-  end
+	
+	def initialize(config)
+		@host = config["plex_host"]
+		@port = config["plex_port"]
+		@tv_index = config["plex_tv_index"]
+		@player = config["plex_player_host"].nil? ? config["plex_host"] : config["plex_player_host"]
+		@plex_library = PlexLibrary.new(@host, @port, @tv_index, @player)
+	end
 
-  listen_for /what\047s on deck/i do
-    ondeck_shows = @plex_library.all_ondeck()
-    if(!ondeck_shows.empty?)
-       say "On Deck shows are:"
-       ondeck_shows.each do |singleshow|
-         say "#{singleshow.gptitle}, #{singleshow.title}"
-       end 
-       response = ask "Which show would you like to watch?"
-       show = @plex_library.find_ondeck_show(response)
-       if(show != nil)
-         @plex_library.play_media(show.key)
-         say "Playing \"#{show.gptitle}\""
-       else
-         say "Sorry I couldn't find #{response}in the ondeck queue"
-       end 
-    else
-      say "Sorry I couldn't find anything in your onDeck queue"
-    end 
-    request_completed
-  end 
+	listen_for /what\047s on deck/i do
+		ondeck_shows = @plex_library.all_ondeck()
+		if(!ondeck_shows.empty?)
+			say "On Deck shows are:"
+			ondeck_shows.each do |singleshow|
+				say "#{singleshow.gptitle}, #{singleshow.title}"
+			end 
+			response = ask "Which show would you like to watch?"
+			if (response.match(/Cancel|None/)) 
+				cancel
+			else
+				show = @plex_library.find_ondeck_show(response)
+				if(show != nil)
+					@plex_library.play_media(show.key)
+					say "Playing \"#{show.gptitle}\""
+				else
+					say "Sorry I couldn't find #{response}in the ondeck queue"
+				end
+			end 
+		else
+			say "Sorry I couldn't find anything in your onDeck queue"
+		end 
+		request_completed
+	end 
 
-  
-  listen_for /(play|playing) (the)? latest(.+) of(.+)/i do |command, misc, some, show|
-    play_latest_episode_of(show)
-    request_completed
-  end
-  
-  listen_for /(play|playing)(.+)/i do |command, show_title|
+	
+	listen_for /(play|playing) (the)? latest(.+) of(.+)/i do |command, misc, some, show|
+		play_latest_episode_of(show)
+		request_completed
+	end
+	
+	listen_for /(play|playing)(.+)/i do |command, show_title|
 
-    season_index = 1
-    show = @plex_library.find_show(show_title)
+		season_index = 1
+		show = @plex_library.find_show(show_title)
 
-    if(@plex_library.has_many_seasons?(show))
-      season_index = ask_for_season
-      episode_index = ask_for_episode
-    else
-      episode_index = ask_for_episode
-    end
-            
-    play_episode(show, episode_index, season_index)
-    
-    request_completed      
-  end
-  
-  listen_for /(play|playing) (.+)\sepisode (.+)/i do |command, first_match, second_match|
-    
-    show_title = first_match
-    
-    if(first_match.match(/(.+) season/))
-      show_title = $1
-    end
-    
-    show = @plex_library.find_show(show_title)    
-    season_index = match_number(first_match, "season")    
-    episode_index = match_number(second_match)
-    
-    #We need to match season in both first match and second
-    #play mythbusters episode 9 season 10 or
-    #play mythbusters season 10 episode 9
-    if(season_index == -1)
-      season = match_number(second_match)
-    end
-    
-    has_many_seasons = @plex_library.has_many_seasons?(show)
-    
-    if(season_index == -1 && has_many_seasons)
-      season_index = ask_for_season
-    elsif(season_index == -1 && !has_many_seasons)
-      season_index = 1
-    end
-    
-    if(show)
-      play_episode(show, episode_index, season_index)
-    else
-      show_not_found
-    end
-    
-    request_completed
-  end
-  
-  def ask_for_number(question)   
-    episode = nil
-    
-    while(response = ask(question))
-      
-      number = -1
-      
-      if(response =~ /([0-9]+\s*|one|two|three|four|five|six|seven|eight|nine|ten)/i)
-        number = $1
-        break
-      else
-        question = "I didn't get that, please state a number"
-      end
-    end
-    
-    if(number.to_i == 0)
-        number = map_siri_numbers_to_int(number)
-    end
-    
-    number.to_i
-  end
-  
-  def match_number(text, key = nil)
-    if(text.match(/#{key}\s*([0-9]+|one|two|three|four|five|six|seven|eight|nine|ten)/i))
-      
-      number = $1.to_i
-      
-      if(number == 0)
-        number = map_siri_numbers_to_int($1)
-      end
-      
-      return number
-    end
-    
-    return -1
-  end
-  
-  def ask_for_season
-    ask_for_number("Which season?")
-  end
-  
-  def ask_for_episode
-    ask_for_number("Which episode?")
-  end
-  
-  def play_episode(show, episode_index, season_index = 1)
-    
-    if(show != nil)
-      episode = @plex_library.find_episode(show, season_index, episode_index)
-      
-      if(episode)
-        @plex_library.play_media(episode.key)
-        say "Playing \"#{episode.title}\""
-      else
-        episode_not_found
-      end
-    else
-      show_not_found
-    end
-  end
-  
-  def show_not_found
-    say "I'm sorry but I couldn't find that TV show"
-  end
-  
-  def episode_not_found
-    say "I'm sorry but I couldn't find the episode you asked for"
-  end
-  
-  def map_siri_numbers_to_int(number)
-    ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"].index(number.downcase)
-  end
-  
-  def play_latest_episode_of(show_title)
-    show = @plex_library.find_show(show_title)
-    
-    episode = @plex_library.latest_episode(show)
+		if(@plex_library.has_many_seasons?(show))
+			season_index = ask_for_season
+			episode_index = ask_for_episode
+		else
+			episode_index = ask_for_episode
+		end
+						
+		play_episode(show, episode_index, season_index)
+		
+		request_completed      
+	end
+	
+	listen_for /(play|playing) (.+)\sepisode (.+)/i do |command, first_match, second_match|
+		
+		show_title = first_match
+		
+		if(first_match.match(/(.+) season/))
+			show_title = $1
+		end
+		
+		show = @plex_library.find_show(show_title)    
+		season_index = match_number(first_match, "season")    
+		episode_index = match_number(second_match)
+		
+		#We need to match season in both first match and second
+		#play mythbusters episode 9 season 10 or
+		#play mythbusters season 10 episode 9
+		if(season_index == -1)
+			season = match_number(second_match)
+		end
+		
+		has_many_seasons = @plex_library.has_many_seasons?(show)
+		
+		if(season_index == -1 && has_many_seasons)
+			season_index = ask_for_season
+		elsif(season_index == -1 && !has_many_seasons)
+			season_index = 1
+		end
+		
+		if(show)
+			play_episode(show, episode_index, season_index)
+		else
+			show_not_found
+		end
+		
+		request_completed
+	end
+	
+	def ask_for_number(question)   
+		episode = nil
+		
+		while(response = ask(question))
+			
+			number = -1
+			
+			if(response =~ /([0-9]+\s*|one|two|three|four|five|six|seven|eight|nine|ten)/i)
+				number = $1
+				break
+			else
+				question = "I didn't get that, please state a number"
+			end
+		end
+		
+		if(number.to_i == 0)
+				number = map_siri_numbers_to_int(number)
+		end
+		
+		number.to_i
+	end
+	
+	def match_number(text, key = nil)
+		if(text.match(/#{key}\s*([0-9]+|one|two|three|four|five|six|seven|eight|nine|ten)/i))
+			
+			number = $1.to_i
+			
+			if(number == 0)
+				number = map_siri_numbers_to_int($1)
+			end
+			
+			return number
+		end
+		
+		return -1
+	end
+	
+	def ask_for_season
+		ask_for_number("Which season?")
+	end
+	
+	def ask_for_episode
+		ask_for_number("Which episode?")
+	end
+	
+	def play_episode(show, episode_index, season_index = 1)
+		
+		if(show != nil)
+			episode = @plex_library.find_episode(show, season_index, episode_index)
+			
+			if(episode)
+				@plex_library.play_media(episode.key)
+				say "Playing \"#{episode.title}\""
+			else
+				episode_not_found
+			end
+		else
+			show_not_found
+		end
+	end
 
-    if(episode != nil)
-      @plex_library.play_media(episode.key)
-      say "Playing \"#{episode.title}\""
-    else
-      episode_not_found
-    end
-  end
-  
+	def cancel
+		say "Alright, mission aborted"
+	end
+
+	def show_not_found
+		say "I'm sorry but I couldn't find that TV show"
+	end
+
+	def episode_not_found
+		say "I'm sorry but I couldn't find the episode you asked for"
+	end
+	
+	def map_siri_numbers_to_int(number)
+		["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"].index(number.downcase)
+	end
+	
+	def play_latest_episode_of(show_title)
+		show = @plex_library.find_show(show_title)
+		
+		episode = @plex_library.latest_episode(show)
+
+		if(episode != nil)
+			@plex_library.play_media(episode.key)
+			say "Playing \"#{episode.title}\""
+		else
+			episode_not_found
+		end
+	end
+	
 end
